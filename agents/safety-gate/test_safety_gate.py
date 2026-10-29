@@ -1100,31 +1100,54 @@ class TestRecentCodingAgentCVEsAndAdvisories(BaseSafetyGateTestCase):
 
     def test_cve_2026_39861_symlink_escape_outside_workspace(self) -> None:
         # Create a temporary symlink inside an isolated workspace dir pointing outside the workspace (e.g. ~/Desktop/outside.txt and /etc/hosts)
+        import subprocess
+
         fake_ws = (self.state_dir / "projects").resolve()
         repo_dir = fake_ws / "safety-gate"
         repo_dir.mkdir(parents=True, exist_ok=True)
         symlink_path = repo_dir / ".tmp_cve_symlink_test"
+
+        def _cleanup_link(p: Path) -> None:
+            if p.is_symlink() or p.exists():
+                try:
+                    p.unlink()
+                except OSError:
+                    p.rmdir()
+
         with (
             mock.patch.object(safety_gate, "WORKSPACE_ROOT", fake_ws),
             mock.patch.object(safety_gate, "WORKSPACE_ROOTS", (fake_ws,)),
         ):
             try:
                 for target_outside in (os.path.expanduser("~/Desktop/outside.txt"), "/etc/hosts"):
-                    if symlink_path.exists() or symlink_path.is_symlink():
-                        symlink_path.unlink()
-                    os.symlink(target_outside, symlink_path)
+                    _cleanup_link(symlink_path)
+                    try:
+                        os.symlink(target_outside, symlink_path)
+                        eval_target = str(symlink_path)
+                    except OSError as e:
+                        if getattr(e, "winerror", None) != 1314:
+                            raise
+                        win_etc = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "drivers" / "etc"
+                        junc_dir = Path.home() if "Desktop" in target_outside else win_etc
+                        leaf = "outside.txt" if "Desktop" in target_outside else "hosts"
+                        subprocess.run(
+                            ["cmd", "/c", "mklink", "/J", str(symlink_path), str(junc_dir)],
+                            check=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                        )
+                        eval_target = str(symlink_path / leaf)
                     dec, stg, _ = safety_gate.evaluate_file_tool(
-                        "write_to_file", {"TargetFile": str(symlink_path)}
+                        "write_to_file", {"TargetFile": eval_target}
                     )
                     self.assertEqual(
                         dec,
                         "force_ask",
-                        f"Expected symlink escape `{symlink_path} -> {target_outside}` to be caught as outside-workspace, got {dec} ({stg})",
+                        f"Expected symlink escape `{eval_target} -> {target_outside}` to be caught as outside-workspace, got {dec} ({stg})",
                     )
                     self.assertEqual(stg, "static-boundary")
             finally:
-                if symlink_path.exists() or symlink_path.is_symlink():
-                    symlink_path.unlink()
+                _cleanup_link(symlink_path)
 
     def test_promptarmor_antigravity_and_env_exfiltration_vectors(self) -> None:
         cwd = str(safety_gate.WORKSPACE_ROOT)
@@ -3137,7 +3160,7 @@ class TestPreSplitModuleContractsAndBoundaries(unittest.TestCase):
                     f"Expected allow for trusted safety_gate.py cloned in {clone_base}, got {(dec, stg, rsn)}",
                 )
             finally:
-                if str(clone_base).startswith("/tmp/"):
+                if str(clone_base).replace("\\", "/").startswith("/tmp/"):
                     shutil.rmtree(clone_base, ignore_errors=True)
 
     def test_shared_hooks_json_non_destructive_install_uninstall_and_accurate_doctor(self) -> None:

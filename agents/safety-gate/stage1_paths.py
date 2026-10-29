@@ -557,6 +557,15 @@ def evaluate_file_tool(tool_name: str, args: Dict[str, Any]) -> Tuple[str, str, 
     except Exception:
         resolved_str = expanded
 
+    for candidate in dict.fromkeys((target, target.replace("\\", "/"), resolved_str, resolved_str.replace("\\", "/"))):
+        for pat in SENSITIVE_CREDENTIAL_PATTERNS:
+            if re.search(pat, candidate):
+                return (
+                    "deny",
+                    "static-deny",
+                    f"Direct modification of sensitive credential file ({target}) is blocked.",
+                )
+
     if _is_protected_self_path(target):
         return (
             "force_ask",
@@ -570,15 +579,6 @@ def evaluate_file_tool(tool_name: str, args: Dict[str, Any]) -> Tuple[str, str, 
             "static-self-protect",
             f"Modifying Git hook or repository/agent config ({target}) requires full-context verification (CVE-2026-26268 / CVE-2025-59536).",
         )
-
-    for candidate in dict.fromkeys((target, target.replace("\\", "/"), resolved_str, resolved_str.replace("\\", "/"))):
-        for pat in SENSITIVE_CREDENTIAL_PATTERNS:
-            if re.search(pat, candidate):
-                return (
-                    "deny",
-                    "static-deny",
-                    f"Direct modification of sensitive credential file ({target}) is blocked.",
-                )
 
     for candidate in dict.fromkeys((target, target.replace("\\", "/"), resolved_str, resolved_str.replace("\\", "/"))):
         if _is_env_secret_file(candidate):

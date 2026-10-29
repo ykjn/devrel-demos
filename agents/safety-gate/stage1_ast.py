@@ -149,7 +149,9 @@ def _inspect_local_script_static(
             canonical_mod = Path(__file__).resolve().parent / script_base
             try:
                 if resolved == canonical_mod.resolve() or (
-                    canonical_mod.is_file() and resolved.read_bytes() == canonical_mod.read_bytes()
+                    canonical_mod.is_file()
+                    and resolved.read_bytes().replace(b"\r\n", b"\n")
+                    == canonical_mod.read_bytes().replace(b"\r\n", b"\n")
                 ):
                     is_verified_trusted_copy = True
                     is_self_signature_verified = True
